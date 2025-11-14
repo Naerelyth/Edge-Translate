@@ -1,0 +1,29 @@
+{
+    "background": {},
+    "permissions": ["notifications", "contextMenus", "storage", "cookies", "tabs"],
+    "host_permissions": ["<all_urls>"],
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["./content/display/display.js", "./content/pdf.js"]
+        },
+        {
+            "matches": ["<all_urls>"],
+            "run_at": "document_start",
+            "js": ["./content/select/select.js"],
+            "css": ["./content/select/select.css"],
+            "all_frames": true
+        },
+        {
+            "matches": ["<all_urls>"],
+            "js": ["./content/banner_controller.js"]
+        },
+        {
+            "matches": ["*://*.deepl.com/*"],
+            "js": ["./content/deepl_injector.js"],
+            "all_frames": true
+        }
+    ],
+    "minimum_chrome_version": "88",
+    "homepage_url": "https://github.com/EdgeTranslate/EdgeTranslate/wiki"
+}
