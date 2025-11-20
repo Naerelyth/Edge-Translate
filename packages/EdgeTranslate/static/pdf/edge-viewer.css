@@ -1,0 +1,174 @@
+/* EdgeTranslate PDF Viewer Theme Styles */
+
+:root {
+  --et-text: #e6ebf1;
+  --et-radius: 10px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --et-text: #1a1f24;
+  }
+}
+
+/* === Page Theme (PDF Content Inversion) === */
+html[data-page-theme="dark"] .pdfViewer .page {
+  filter: brightness(0.85) grayscale(0.15) invert(1.0) hue-rotate(0.5turn);
+  border-image: none;
+  box-shadow: none;
+}
+
+/* Revert inversion for annotations to maintain natural colors */
+html[data-page-theme="dark"] .annotationLayer img,
+html[data-page-theme="dark"] .annotationLayer canvas,
+html[data-page-theme="dark"] .annotationLayer svg {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Improve text selection visibility under inversion */
+html[data-page-theme="dark"] #viewer .textLayer span::selection {
+  background: rgba(79, 140, 255, 0.35) !important;
+}
+
+/* === Theme Toggle Button === */
+#etThemeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--toolbar-height, 44px) - 2 * var(--toolbar-vertical-padding, 6px));
+  box-sizing: border-box;
+  gap: 6px;
+  background-color: transparent !important;
+}
+
+/* Remove PDF.js default masked pseudo icon */
+#etThemeToggle::before {
+  content: none !important;
+  display: none !important;
+}
+
+/* Button states */
+#etThemeToggle:hover {
+  background-color: var(--button-hover-color) !important;
+}
+
+#etThemeToggle[aria-expanded="true"] {
+  background-color: var(--toggled-btn-bg-color) !important;
+}
+
+#etThemeToggle[aria-expanded="true"]:hover {
+  background-color: var(--button-hover-color) !important;
+}
+
+/* Icon visibility toggle */
+html[data-theme="dark"] #etThemeToggle .icon-sun { display: none; }
+html[data-theme="dark"] #etThemeToggle .icon-moon { display: inline-flex; }
+html[data-theme="light"] #etThemeToggle .icon-sun { display: inline-flex; }
+html[data-theme="light"] #etThemeToggle .icon-moon { display: none; }
+
+#etThemeToggle svg {
+  width: var(--icon-size, 18px) !important;
+  height: var(--icon-size, 18px) !important;
+  display: block;
+  fill: var(--toolbar-icon-bg-color) !important;
+  opacity: var(--toolbar-icon-opacity) !important;
+}
+
+/* Override PDF.js rule that hides button spans */
+#etThemeToggle > span {
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+/* === Theme Menu === */
+#etTheme {
+  display: inline-block;
+  position: relative;
+  vertical-align: middle;
+}
+
+#etTheme .menu {
+  position: absolute;
+  right: 0;
+}
+
+#etThemeMenu.menu {
+  min-width: 140px;
+  width: 172px;
+}
+
+#etThemeMenu .menuContainer {
+  text-align: left !important;
+  width: auto !important;
+  min-width: 140px !important;
+  padding: 6px 8px !important;
+}
+
+/* Menu buttons base styles */
+#etThemeMenu .menuContainer .toolbarButton {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+#etThemeMenu .menuContainer .toolbarButton:hover {
+  background-color: var(--menuitem-hover-bg-color, rgba(79, 140, 255, 0.15)) !important;
+  border-radius: var(--et-radius) !important;
+}
+
+#etThemeMenu .menuContainer .toolbarButton:focus-visible {
+  outline: 2px solid var(--menu-button-focus-outline-color, #4f8cff) !important;
+  outline-offset: 2px !important;
+}
+
+#etThemeMenu .menuContainer .toolbarButton.toggled {
+  background: var(--menuitem-toogled-bg-color, rgba(128, 128, 188, 0.15)) !important;
+  border-radius: var(--et-radius) !important;
+}
+
+#etThemeMenu .menuContainer .toolbarButton.toggled:hover {
+  background-color: var(--menuitem-hover-bg-color, rgba(79, 140, 255, 0.15)) !important;
+  border-radius: var(--et-radius) !important;
+}
+
+/* Icon-only buttons (Auto, Light, Dark) */
+#etThemeMenu .menuContainer button[id$="Icon"] {
+  display: inline-flex !important;
+  width: calc(var(--menu-item-height, 36px) + 4px) !important;
+  height: calc(var(--menu-item-height, 36px) + 4px) !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  justify-content: center !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+}
+
+#etThemeMenu .menuContainer button[id$="Icon"]::before {
+  content: none !important;
+  display: none !important;
+}
+
+#etThemeMenu .menuContainer button[id$="Icon"] > span {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  width: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+#etThemeMenu .menuContainer button[id$="Icon"] svg {
+  width: var(--icon-size, 18px);
+  height: var(--icon-size, 18px);
+}
+
+/* Icon rows */
+.et-theme-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 6px;
+  justify-content: space-between;
+}
+
+.et-theme-row > .toolbarButton {
+  flex: 0 0 auto;
+}
