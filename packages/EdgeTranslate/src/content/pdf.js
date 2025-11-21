@@ -1,6 +1,27 @@
-// 在 content/display/display.js 的顶部添加
-if (typeof window !== "undefined" && !window.document) {
+// ==========================================
+// FIX START: 插件兼容性补丁区域
+// ==========================================
+
+// [FIX 1] 解决 styled-components 的 "REACT_APP_SC_ATTR" 报错
+// 原因：浏览器插件环境缺少 Node.js 的 process 对象
+// 注意：这个补丁是为了支持插件的 UI 代码（如翻译面板），而非 PDF.js 本身
+if (typeof window !== "undefined" && typeof process === "undefined") {
+  window.process = {
+    env: {
+      REACT_APP_SC_ATTR: "data-styled",
+      SC_ATTR: "data-styled",
+      NODE_ENV: "production"
+    }
+  };
+}
+
+// [FIX 2] 确保 document 和 window 对象可访问（解决某些样式库的访问问题）
+// 这可以防止 "Cannot set properties of undefined" 错误
+if (typeof window !== "undefined") {
+  // 确保 document 可以从 window 访问
+  if (!window.document && typeof document !== "undefined") {
     window.document = document;
+  }
 }
 
 import { isChromePDFViewer } from "./common.js"; // judge if this page is a pdf file
