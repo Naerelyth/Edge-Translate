@@ -50,6 +50,7 @@ module.exports = {
             react: "preact/compat",
             "react-dom/test-utils": "preact/test-utils",
             "react-dom": "preact/compat",
+            "styled-components": path.resolve(__dirname, "../../../node_modules/styled-components"),
         },
         fallback: {
             path: false,

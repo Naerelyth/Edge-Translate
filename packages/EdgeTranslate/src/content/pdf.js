@@ -1,3 +1,8 @@
+// 在 content/display/display.js 的顶部添加
+if (typeof window !== "undefined" && !window.document) {
+    window.document = document;
+}
+
 import { isChromePDFViewer } from "./common.js"; // judge if this page is a pdf file
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
