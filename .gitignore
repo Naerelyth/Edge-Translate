@@ -10,3 +10,4 @@
 **/.idea
 **/*.log
 **/image_snapshots/
+packages/EdgeTranslate/build

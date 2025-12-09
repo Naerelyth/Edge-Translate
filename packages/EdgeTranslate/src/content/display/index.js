@@ -14,6 +14,8 @@ const FILTERED_ERROR_PATTERNS = [
     "Extension context invalidated",
     "Canvas error",
     "Network error",
+    "Missing PDF",
+    "Unexpected server response",
 ];
 
 function shouldFilterError(message) {
