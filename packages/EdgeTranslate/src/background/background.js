@@ -12,7 +12,233 @@ import { promiseTabs } from "common/scripts/promise.js";
 import Channel from "common/scripts/channel.js";
 // map language abbreviation from browser languages to translation languages
 import { BROWSER_LANGUAGES_MAP } from "common/scripts/languages.js";
-import { DEFAULT_SETTINGS, setDefaultSettings } from "common/scripts/settings.js";
+import {
+    DEFAULT_SETTINGS,
+    setDefaultSettings,
+    getOrSetDefaultSettings,
+} from "common/scripts/settings.js";
+
+// MV3 Service Worker lifecycle note:
+// The SW can be terminated when idle. On cold start, content scripts may send
+// messages immediately; register the runtime message listener ASAP.
+const channel = new Channel();
+
+// Handle PDF redirect requests from `content/pdf.js`.
+channel.on("redirect", (detail, sender) =>
+    chrome.tabs.update(sender.tab.id, {
+        url: detail.url,
+    })
+);
+
+// ------------------------------------------------------------
+// PDF auto redirect (background-driven, MV3-safe)
+// Some PDFs can be opened as a raw `file://...pdf` document where content
+// scripts cannot run. Handle those navigations here.
+// ------------------------------------------------------------
+
+let usePdfjsEnabled = true;
+const viewerBaseUrl = chrome.runtime.getURL("pdf/viewer.html");
+
+const lastHandledUrlByTabId = new Map();
+
+const REMOTE_PDF_CACHE_TTL_MS = 10 * 60 * 1000;
+const REMOTE_PDF_CACHE_MAX = 128;
+const remotePdfByHeaderCache = new Map();
+const remotePdfByHeaderInflight = new Map();
+
+function isPdfUrl(url) {
+    if (!url || typeof url !== "string") return false;
+    // Ignore internal pages.
+    if (url.startsWith("chrome://") || url.startsWith("edge://")) return false;
+    if (url.startsWith("chrome-extension://") || url.startsWith("moz-extension://")) {
+        return false;
+    }
+
+    try {
+        const parsed = new URL(url);
+        const pathname = parsed.pathname || "";
+        return pathname.toLowerCase().endsWith(".pdf");
+    } catch {
+        // If URL parsing fails, fallback to a simple check.
+        return /\.pdf(?:$|[?#])/i.test(url);
+    }
+}
+
+function isProbablyPdfUrl(url) {
+    if (!url || typeof url !== "string") return false;
+
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+        const pathname = parsed.pathname || "";
+
+        // Common patterns for PDF endpoints without .pdf extension.
+        // Example: https://arxiv.org/pdf/1706.03762
+        if (/\/pdf(\/|$)/i.test(pathname)) return true;
+
+        // Query-based patterns: ...?format=pdf / ...?output=pdf
+        const params = parsed.searchParams;
+        const format = params.get("format") || params.get("output") || params.get("type");
+        if (format && /pdf/i.test(format)) return true;
+
+        return false;
+    } catch {
+        return false;
+    }
+}
+
+async function isRemotePdfByHeaders(url) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+    try {
+        const resp = await fetch(url, {
+            method: "HEAD",
+            redirect: "follow",
+            signal: controller.signal,
+        });
+
+        const contentType = resp.headers.get("content-type") || "";
+        return /application\/pdf/i.test(contentType);
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+function getRemotePdfHeaderCache(url) {
+    const entry = remotePdfByHeaderCache.get(url);
+    if (!entry) return null;
+    if (entry.expiresAt <= Date.now()) {
+        remotePdfByHeaderCache.delete(url);
+        return null;
+    }
+    // LRU-ish: bump to the end on hit.
+    remotePdfByHeaderCache.delete(url);
+    remotePdfByHeaderCache.set(url, entry);
+    return entry.isPdf;
+}
+
+function setRemotePdfHeaderCache(url, isPdf) {
+    remotePdfByHeaderCache.set(url, {
+        isPdf: !!isPdf,
+        expiresAt: Date.now() + REMOTE_PDF_CACHE_TTL_MS,
+    });
+    while (remotePdfByHeaderCache.size > REMOTE_PDF_CACHE_MAX) {
+        const oldestKey = remotePdfByHeaderCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        remotePdfByHeaderCache.delete(oldestKey);
+    }
+}
+
+async function isRemotePdfByHeadersCached(url) {
+    const cached = getRemotePdfHeaderCache(url);
+    if (cached !== null) return cached;
+
+    const inflight = remotePdfByHeaderInflight.get(url);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+        const isPdf = await isRemotePdfByHeaders(url);
+        setRemotePdfHeaderCache(url, isPdf);
+        return isPdf;
+    })().finally(() => {
+        remotePdfByHeaderInflight.delete(url);
+    });
+
+    remotePdfByHeaderInflight.set(url, promise);
+    return promise;
+}
+
+function isOurPdfViewerUrl(url) {
+    return typeof url === "string" && url.startsWith(viewerBaseUrl);
+}
+
+async function refreshUsePdfjsSetting() {
+    try {
+        const result = await getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS);
+        usePdfjsEnabled = !!result?.OtherSettings?.UsePDFjs;
+    } catch {
+        // Keep previous value on failure.
+    }
+}
+
+refreshUsePdfjsSetting();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "sync") return;
+    if (changes.OtherSettings) {
+        usePdfjsEnabled = !!changes.OtherSettings.newValue?.UsePDFjs;
+    }
+});
+
+function redirectTabToPdfViewer(tabId, sourceUrl) {
+    const targetUrl = chrome.runtime.getURL(
+        `pdf/viewer.html?file=${encodeURIComponent(sourceUrl)}`
+    );
+    try {
+        chrome.tabs.update(tabId, { url: targetUrl });
+    } catch {}
+}
+
+function maybeAutoRedirectPdf(tabId, url) {
+    if (!usePdfjsEnabled) return;
+    if (!url) return;
+    if (isOurPdfViewerUrl(url)) return;
+
+    if (isPdfUrl(url)) {
+        logInfo("Auto redirect PDF to built-in viewer", { tabId, url });
+        redirectTabToPdfViewer(tabId, url);
+        return;
+    }
+
+    // Handle PDF endpoints without `.pdf` extension (e.g. arXiv).
+    if (!isProbablyPdfUrl(url)) return;
+
+    void (async () => {
+        const isPdf = await isRemotePdfByHeadersCached(url);
+        if (!isPdf) return;
+        if (!usePdfjsEnabled) return;
+
+        logInfo("Auto redirect remote PDF (no extension)", { tabId, url });
+        redirectTabToPdfViewer(tabId, url);
+    })();
+}
+
+// Prefer webNavigation: it fires once per real navigation (lower overhead than tabs.onUpdated).
+if (chrome.webNavigation?.onCommitted?.addListener) {
+    chrome.webNavigation.onCommitted.addListener(
+        (details) => {
+            if (!usePdfjsEnabled) return;
+            if (!details || details.frameId !== 0) return;
+
+            const tabId = details.tabId;
+            const url = details.url;
+            if (!url) return;
+
+            const lastHandled = lastHandledUrlByTabId.get(tabId);
+            if (lastHandled === url) return;
+            lastHandledUrlByTabId.set(tabId, url);
+
+            maybeAutoRedirectPdf(tabId, url);
+        },
+        {
+            url: [{ schemes: ["file"] }, { schemes: ["http"] }, { schemes: ["https"] }],
+        }
+    );
+} else {
+    // Fallback for environments without webNavigation (should be rare).
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+        const url = changeInfo?.url || tab?.url;
+        if (!url) return;
+        maybeAutoRedirectPdf(tabId, url);
+    });
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    lastHandledUrlByTabId.delete(tabId);
+});
 
 /**
  * Service Worker 오류 필터링 - 알려진 오류 패턴들을 차단
@@ -856,7 +1082,7 @@ chrome.runtime.onStartup.addListener(() => {
 /**
  * Create communication channel.
  */
-const channel = new Channel();
+// channel is initialized at top-level (MV3 cold-start safe)
 
 /**
  * Create translator manager and register event listeners and service providers.
@@ -959,11 +1185,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         updateBLackListMenu(tab.url);
     }
 });
-
-/**
- * Redirect tab when redirect event happens.
- */
-channel.on("redirect", (detail, sender) => chrome.tabs.update(sender.tab.id, { url: detail.url }));
 
 /**
  * Open options page when open_options_page button clicked.

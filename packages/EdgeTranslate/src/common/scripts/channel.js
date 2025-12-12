@@ -30,7 +30,13 @@ class Channel {
          */
         chrome.runtime.onMessage.addListener(
             ((message, sender, callback) => {
-                let parsed = JSON.parse(message);
+                let parsed;
+                try {
+                    parsed = typeof message === "string" ? JSON.parse(message) : message;
+                } catch (error) {
+                    console.error("Failed to parse message", error);
+                    return;
+                }
 
                 if (!parsed || !parsed.type) {
                     console.error(`Bad message: ${message}`);
@@ -53,7 +59,7 @@ class Channel {
                         return true;
                     }
                     default:
-                        console.error(`Unknown message type: ${message.type}`);
+                        console.error(`Unknown message type: ${parsed.type}`);
                         break;
                 }
                 return;

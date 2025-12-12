@@ -6,29 +6,40 @@
 // 原因：浏览器插件环境缺少 Node.js 的 process 对象
 // 注意：这个补丁是为了支持插件的 UI 代码（如翻译面板），而非 PDF.js 本身
 if (typeof window !== "undefined" && typeof process === "undefined") {
-  window.process = {
-    env: {
-      REACT_APP_SC_ATTR: "data-styled",
-      SC_ATTR: "data-styled",
-      NODE_ENV: "production"
-    }
-  };
+    window.process = {
+        env: {
+            REACT_APP_SC_ATTR: "data-styled",
+            SC_ATTR: "data-styled",
+            NODE_ENV: "production",
+        },
+    };
 }
 
 // [FIX 2] 确保 document 和 window 对象可访问（解决某些样式库的访问问题）
 // 这可以防止 "Cannot set properties of undefined" 错误
 if (typeof window !== "undefined") {
-  // 确保 document 可以从 window 访问
-  if (!window.document && typeof document !== "undefined") {
-    window.document = document;
-  }
+    // 确保 document 可以从 window 访问
+    if (!window.document && typeof document !== "undefined") {
+        window.document = document;
+    }
 }
 
 import { isChromePDFViewer } from "./common.js"; // judge if this page is a pdf file
-import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 
-const channel = new Channel();
+function emitRedirect(url) {
+    chrome.runtime.sendMessage(
+        {
+            type: "event",
+            event: "redirect",
+            detail: { url },
+        },
+        () => {
+            // Best-effort: ignore errors (tab may be gone, extension reloading, etc.)
+            void chrome.runtime.lastError;
+        }
+    );
+}
 /**
  * 处理PDF文件链接
  *
@@ -81,9 +92,26 @@ function redirect(pdfSrc) {
     getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS).then((result) => {
         let OtherSettings = result.OtherSettings;
         if (OtherSettings && OtherSettings["UsePDFjs"]) {
-            channel.emit("redirect", {
-                url: chrome.runtime.getURL(`pdf/viewer.html?file=${encodeURIComponent(pdfSrc)}`),
-            });
+            const targetUrl = chrome.runtime.getURL(
+                `pdf/viewer.html?file=${encodeURIComponent(pdfSrc)}`
+            );
+
+            // If the extension context is invalidated (e.g. after reload), Chrome can
+            // produce `chrome-extension://invalid/` URLs; don't navigate to those.
+            if (
+                !chrome?.runtime?.id ||
+                (typeof targetUrl === "string" &&
+                    targetUrl.startsWith("chrome-extension://invalid/"))
+            ) {
+                console.error("EdgeTranslate: invalid extension URL, skip redirect", {
+                    runtimeId: chrome?.runtime?.id,
+                    targetUrl,
+                });
+                return;
+            }
+
+            // Ask background service worker to update the tab URL.
+            emitRedirect(targetUrl);
         }
     });
 }
