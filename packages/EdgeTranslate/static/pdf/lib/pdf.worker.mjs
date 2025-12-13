@@ -57008,6 +57008,10 @@ class PDFDocument {
             docInfo[key] = value;
             continue;
           }
+          if (typeof value === "boolean") {
+            docInfo[key] = value;
+            continue;
+          }
           break;
         default:
           let customValue;
@@ -57021,7 +57025,43 @@ class PDFDocument {
               break;
             default:
               if (value instanceof Name) {
-                customValue = value;
+                customValue = value.name;
+                break;
+              }
+              if (value instanceof Ref) {
+                customValue = value.toString();
+                break;
+              }
+              if (value instanceof Dict) {
+                customValue = value.getKeys();
+                break;
+              }
+              if (Array.isArray(value)) {
+                customValue = value.map(v => {
+                  switch (typeof v) {
+                    case "string":
+                      return stringToPDFString(v);
+                    case "number":
+                    case "boolean":
+                      return v;
+                    default:
+                      if (v instanceof Name) {
+                        return v.name;
+                      }
+                      if (v instanceof Ref) {
+                        return v.toString();
+                      }
+                      return String(v);
+                  }
+                });
+                break;
+              }
+              if (value && typeof value === "object") {
+                try {
+                  customValue = JSON.stringify(value);
+                } catch {
+                  customValue = String(value);
+                }
               }
               break;
           }
