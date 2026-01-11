@@ -107,6 +107,7 @@
         "storage",
         "tabs",
         "webNavigation",
+        "webRequest",
         "declarativeNetRequest"
     ],
     "host_permissions": ["*://*/*"],

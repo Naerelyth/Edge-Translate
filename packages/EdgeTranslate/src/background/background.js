@@ -36,209 +36,402 @@ channel.on("redirect", (detail, sender) =>
 // scripts cannot run. Handle those navigations here.
 // ------------------------------------------------------------
 
-let usePdfjsEnabled = true;
-const viewerBaseUrl = chrome.runtime.getURL("pdf/viewer.html");
+const PdfAutoRedirect = (() => {
+    const state = {
+        enabled: true,
+        viewerBaseUrl: chrome.runtime.getURL("pdf/viewer.html"),
+        extensionScheme: null,
+        viewerOrigin: null,
+    };
 
-const lastHandledUrlByTabId = new Map();
+    const lastHandledUrlByTabId = new Map();
+    const lastRedirectedPdfByTabId = new Map();
 
-const REMOTE_PDF_CACHE_TTL_MS = 10 * 60 * 1000;
-const REMOTE_PDF_CACHE_MAX = 128;
-const remotePdfByHeaderCache = new Map();
-const remotePdfByHeaderInflight = new Map();
+    const PDF_CACHE_TTL_MS = 10 * 60 * 1000;
+    const PDF_CACHE_TTL_SHORT_MS = 5 * 1000;
+    const PDF_CACHE_MAX = 128;
+    const remotePdfByHeaderCache = new Map();
+    const remotePdfByHeaderInflight = new Map();
 
-function isPdfUrl(url) {
-    if (!url || typeof url !== "string") return false;
-    // Ignore internal pages.
-    if (url.startsWith("chrome://") || url.startsWith("edge://")) return false;
-    if (url.startsWith("chrome-extension://") || url.startsWith("moz-extension://")) {
+    function init() {
+        state.extensionScheme = (() => {
+            try {
+                return new URL(state.viewerBaseUrl).protocol.replace(":", "");
+            } catch {
+                return null;
+            }
+        })();
+
+        state.viewerOrigin = (() => {
+            try {
+                return new URL(state.viewerBaseUrl).origin;
+            } catch {
+                return null;
+            }
+        })();
+
+        void refreshEnabledSetting();
+        registerSettingsListener();
+        registerWebRequestListener();
+        registerWebNavigationListener();
+        registerCleanupListener();
+    }
+
+    function isOurPdfViewerUrl(url) {
+        return typeof url === "string" && url.startsWith(state.viewerBaseUrl);
+    }
+
+    function isOurExtensionInitiator(initiator) {
+        if (!initiator || typeof initiator !== "string") return false;
+        if (!state.viewerOrigin) return false;
+        return initiator.startsWith(state.viewerOrigin);
+    }
+
+    function shouldSkipPdfRedirect(url) {
+        if (!state.enabled) return true;
+        if (!url) return true;
+        if (isOurPdfViewerUrl(url)) return true;
         return false;
     }
 
-    try {
-        const parsed = new URL(url);
-        const pathname = parsed.pathname || "";
-        return pathname.toLowerCase().endsWith(".pdf");
-    } catch {
-        // If URL parsing fails, fallback to a simple check.
-        return /\.pdf(?:$|[?#])/i.test(url);
-    }
-}
-
-function isProbablyPdfUrl(url) {
-    if (!url || typeof url !== "string") return false;
-
-    try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-
-        const pathname = parsed.pathname || "";
-
-        // Common patterns for PDF endpoints without .pdf extension.
-        // Example: https://arxiv.org/pdf/1706.03762
-        if (/\/pdf(\/|$)/i.test(pathname)) return true;
-
-        // Query-based patterns: ...?format=pdf / ...?output=pdf
-        const params = parsed.searchParams;
-        const format = params.get("format") || params.get("output") || params.get("type");
-        if (format && /pdf/i.test(format)) return true;
-
-        return false;
-    } catch {
-        return false;
-    }
-}
-
-async function isRemotePdfByHeaders(url) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1500);
-    try {
-        const resp = await fetch(url, {
-            method: "HEAD",
-            redirect: "follow",
-            signal: controller.signal,
-        });
-
-        const contentType = resp.headers.get("content-type") || "";
-        return /application\/pdf/i.test(contentType);
-    } catch {
-        return false;
-    } finally {
-        clearTimeout(timeoutId);
-    }
-}
-
-function getRemotePdfHeaderCache(url) {
-    const entry = remotePdfByHeaderCache.get(url);
-    if (!entry) return null;
-    if (entry.expiresAt <= Date.now()) {
-        remotePdfByHeaderCache.delete(url);
-        return null;
-    }
-    // LRU-ish: bump to the end on hit.
-    remotePdfByHeaderCache.delete(url);
-    remotePdfByHeaderCache.set(url, entry);
-    return entry.isPdf;
-}
-
-function setRemotePdfHeaderCache(url, isPdf) {
-    remotePdfByHeaderCache.set(url, {
-        isPdf: !!isPdf,
-        expiresAt: Date.now() + REMOTE_PDF_CACHE_TTL_MS,
-    });
-    while (remotePdfByHeaderCache.size > REMOTE_PDF_CACHE_MAX) {
-        const oldestKey = remotePdfByHeaderCache.keys().next().value;
-        if (oldestKey === undefined) break;
-        remotePdfByHeaderCache.delete(oldestKey);
-    }
-}
-
-async function isRemotePdfByHeadersCached(url) {
-    const cached = getRemotePdfHeaderCache(url);
-    if (cached !== null) return cached;
-
-    const inflight = remotePdfByHeaderInflight.get(url);
-    if (inflight) return inflight;
-
-    const promise = (async () => {
-        const isPdf = await isRemotePdfByHeaders(url);
-        setRemotePdfHeaderCache(url, isPdf);
-        return isPdf;
-    })().finally(() => {
-        remotePdfByHeaderInflight.delete(url);
-    });
-
-    remotePdfByHeaderInflight.set(url, promise);
-    return promise;
-}
-
-function isOurPdfViewerUrl(url) {
-    return typeof url === "string" && url.startsWith(viewerBaseUrl);
-}
-
-async function refreshUsePdfjsSetting() {
-    try {
-        const result = await getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS);
-        usePdfjsEnabled = !!result?.OtherSettings?.UsePDFjs;
-    } catch {
-        // Keep previous value on failure.
-    }
-}
-
-refreshUsePdfjsSetting();
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "sync") return;
-    if (changes.OtherSettings) {
-        usePdfjsEnabled = !!changes.OtherSettings.newValue?.UsePDFjs;
-    }
-});
-
-function redirectTabToPdfViewer(tabId, sourceUrl) {
-    const targetUrl = chrome.runtime.getURL(
-        `pdf/viewer.html?file=${encodeURIComponent(sourceUrl)}`
-    );
-    try {
-        chrome.tabs.update(tabId, { url: targetUrl });
-    } catch {}
-}
-
-function maybeAutoRedirectPdf(tabId, url) {
-    if (!usePdfjsEnabled) return;
-    if (!url) return;
-    if (isOurPdfViewerUrl(url)) return;
-
-    if (isPdfUrl(url)) {
-        logInfo("Auto redirect PDF to built-in viewer", { tabId, url });
-        redirectTabToPdfViewer(tabId, url);
-        return;
-    }
-
-    // Handle PDF endpoints without `.pdf` extension (e.g. arXiv).
-    if (!isProbablyPdfUrl(url)) return;
-
-    void (async () => {
-        const isPdf = await isRemotePdfByHeadersCached(url);
-        if (!isPdf) return;
-        if (!usePdfjsEnabled) return;
-
-        logInfo("Auto redirect remote PDF (no extension)", { tabId, url });
-        redirectTabToPdfViewer(tabId, url);
-    })();
-}
-
-// Prefer webNavigation: it fires once per real navigation (lower overhead than tabs.onUpdated).
-if (chrome.webNavigation?.onCommitted?.addListener) {
-    chrome.webNavigation.onCommitted.addListener(
-        (details) => {
-            if (!usePdfjsEnabled) return;
-            if (!details || details.frameId !== 0) return;
-
-            const tabId = details.tabId;
-            const url = details.url;
-            if (!url) return;
-
-            const lastHandled = lastHandledUrlByTabId.get(tabId);
-            if (lastHandled === url) return;
-            lastHandledUrlByTabId.set(tabId, url);
-
-            maybeAutoRedirectPdf(tabId, url);
-        },
-        {
-            url: [{ schemes: ["file"] }, { schemes: ["http"] }, { schemes: ["https"] }],
+    async function refreshEnabledSetting() {
+        try {
+            const result = await getOrSetDefaultSettings("OtherSettings", DEFAULT_SETTINGS);
+            state.enabled = !!result?.OtherSettings?.UsePDFjs;
+        } catch {
+            // Keep previous value on failure.
         }
-    );
-} else {
-    // Fallback for environments without webNavigation (should be rare).
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-        const url = changeInfo?.url || tab?.url;
-        if (!url) return;
-        maybeAutoRedirectPdf(tabId, url);
-    });
-}
+    }
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-    lastHandledUrlByTabId.delete(tabId);
-});
+    function registerSettingsListener() {
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName !== "sync") return;
+            if (changes.OtherSettings) {
+                state.enabled = !!changes.OtherSettings.newValue?.UsePDFjs;
+            }
+        });
+    }
+
+    function redirectTabToPdfViewer(tabId, sourceUrl) {
+        const targetUrl = chrome.runtime.getURL(
+            `pdf/viewer.html?file=${encodeURIComponent(sourceUrl)}`
+        );
+        try {
+            chrome.tabs.update(tabId, { url: targetUrl });
+        } catch {}
+    }
+
+    function isPdfUrl(url) {
+        if (!url || typeof url !== "string") return false;
+        if (url.startsWith("chrome://") || url.startsWith("edge://")) return false;
+        if (url.startsWith("chrome-extension://") || url.startsWith("moz-extension://"))
+            return false;
+
+        try {
+            const { pathname = "" } = new URL(url);
+            return pathname.toLowerCase().endsWith(".pdf");
+        } catch {
+            return /\.pdf(?:$|[?#])/i.test(url);
+        }
+    }
+
+    function isProbablyPdfUrl(url) {
+        if (!url || typeof url !== "string") return false;
+
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+            const pathname = parsed.pathname || "";
+            if (/\/pdf(\/|$)/i.test(pathname)) return true;
+
+            const params = parsed.searchParams;
+            const format = params.get("format") || params.get("output") || params.get("type");
+            return !!(format && /pdf/i.test(format));
+        } catch {
+            return false;
+        }
+    }
+
+    function extractPdfSourceUrlFromExtensionViewerUrl(url) {
+        if (!url || typeof url !== "string") return null;
+        if (isOurPdfViewerUrl(url)) return null;
+
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== "chrome-extension:" && parsed.protocol !== "moz-extension:") {
+                return null;
+            }
+
+            const candidate =
+                parsed.searchParams.get("file") ||
+                parsed.searchParams.get("src") ||
+                parsed.searchParams.get("source") ||
+                parsed.searchParams.get("url");
+
+            if (!candidate) return null;
+
+            const decoded = (() => {
+                try {
+                    return decodeURIComponent(candidate);
+                } catch {
+                    return candidate;
+                }
+            })();
+
+            if (typeof decoded !== "string") return null;
+            if (
+                !decoded.startsWith("http:") &&
+                !decoded.startsWith("https:") &&
+                !decoded.startsWith("file:")
+            ) {
+                return null;
+            }
+
+            return decoded;
+        } catch {
+            return null;
+        }
+    }
+
+    function getHeaderValue(headers, name) {
+        if (!Array.isArray(headers)) return "";
+        const target = String(name || "").toLowerCase();
+        const header = headers.find((h) => String(h?.name || "").toLowerCase() === target);
+        return String(header?.value || "");
+    }
+
+    function isPdfResponseHeaders(headers) {
+        const contentType = getHeaderValue(headers, "content-type");
+        if (/application\/(x-)?pdf/i.test(contentType)) return true;
+
+        const contentDisposition = getHeaderValue(headers, "content-disposition");
+        if (/filename\*?=/.test(contentDisposition) && /\.pdf\b/i.test(contentDisposition)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function dedupePdfRedirect(tabId, sourceUrl) {
+        const now = Date.now();
+        const last = lastRedirectedPdfByTabId.get(tabId);
+        if (last && last.url === sourceUrl && now - last.at < 1500) return true;
+        lastRedirectedPdfByTabId.set(tabId, { url: sourceUrl, at: now });
+        return false;
+    }
+
+    async function isRemotePdfByHeaders(url) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        try {
+            const resp = await fetch(url, {
+                method: "HEAD",
+                redirect: "follow",
+                credentials: "include",
+                signal: controller.signal,
+            });
+
+            const contentType = resp.headers.get("content-type") || "";
+            return /application\/pdf/i.test(contentType);
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    function getRemotePdfHeaderCache(url) {
+        const entry = remotePdfByHeaderCache.get(url);
+        if (!entry) return null;
+        if (entry.expiresAt <= Date.now()) {
+            remotePdfByHeaderCache.delete(url);
+            return null;
+        }
+
+        remotePdfByHeaderCache.delete(url);
+        remotePdfByHeaderCache.set(url, entry);
+        return entry.isPdf;
+    }
+
+    function setRemotePdfHeaderCache(url, isPdf) {
+        const ttl = isPdf ? PDF_CACHE_TTL_MS : PDF_CACHE_TTL_SHORT_MS;
+        remotePdfByHeaderCache.set(url, { isPdf: !!isPdf, expiresAt: Date.now() + ttl });
+
+        while (remotePdfByHeaderCache.size > PDF_CACHE_MAX) {
+            const oldestKey = remotePdfByHeaderCache.keys().next().value;
+            if (oldestKey === undefined) break;
+            remotePdfByHeaderCache.delete(oldestKey);
+        }
+    }
+
+    async function isRemotePdfByHeadersCached(url) {
+        const cached = getRemotePdfHeaderCache(url);
+        if (cached !== null) return cached;
+
+        const inflight = remotePdfByHeaderInflight.get(url);
+        if (inflight) return inflight;
+
+        const promise = (async () => {
+            const isPdf = await isRemotePdfByHeaders(url);
+            setRemotePdfHeaderCache(url, isPdf);
+            return isPdf;
+        })().finally(() => remotePdfByHeaderInflight.delete(url));
+
+        remotePdfByHeaderInflight.set(url, promise);
+        return promise;
+    }
+
+    function maybeAutoRedirectPdf(tabId, url, options = {}) {
+        const { forceRemoteHeaderCheck = false } = options;
+        if (shouldSkipPdfRedirect(url)) return;
+
+        // 1. URL-based detection (Local & Remote)
+        // If the URL ends in .pdf, we assume it's a PDF and redirect.
+        // This covers local files (file://) and serves as a fallback for remote files
+        // if webRequest missed them or we are in a race condition.
+        if (isPdfUrl(url)) {
+            if (dedupePdfRedirect(tabId, url)) return;
+            logInfo("Auto redirect PDF (by URL)", { tabId, url });
+            redirectTabToPdfViewer(tabId, url);
+            return;
+        }
+
+        // 2. Heuristic fallback for non-standard URLs (no .pdf extension)
+        // Use this when webRequest isn't available, or when the URL was extracted
+        // from a browser PDF viewer (e.g., chrome-extension://.../index.html?file=...)
+        // since the actual PDF is fetched as a subresource and won't be detected
+        // by main_frame headers.
+        if (!chrome.webRequest?.onHeadersReceived?.addListener || forceRemoteHeaderCheck) {
+            if (!isProbablyPdfUrl(url) && !forceRemoteHeaderCheck) return;
+
+            try {
+                const parsed = new URL(url);
+                if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+            } catch {
+                return;
+            }
+
+            void (async () => {
+                const isPdf = await isRemotePdfByHeadersCached(url);
+                if (!isPdf || !state.enabled) return;
+                if (dedupePdfRedirect(tabId, url)) return;
+                logInfo("Auto redirect remote PDF (fallback)", {
+                    tabId,
+                    url,
+                    forced: forceRemoteHeaderCheck,
+                });
+                redirectTabToPdfViewer(tabId, url);
+            })();
+        }
+    }
+
+    function registerWebRequestListener() {
+        if (!chrome.webRequest?.onHeadersReceived?.addListener) return;
+
+        try {
+            chrome.webRequest.onHeadersReceived.addListener(
+                (details) => {
+                    if (!state.enabled) return;
+                    if (!details) return;
+                    if (!details.url || (details.url.startsWith("http:") === false && details.url.startsWith("https:") === false)) {
+                        return;
+                    }
+                    const tabId = details.tabId;
+                    if (typeof tabId !== "number" || tabId < 0) return;
+
+                    if (isOurExtensionInitiator(details.initiator)) return;
+
+                    const url = details.url;
+                    if (shouldSkipPdfRedirect(url)) return;
+                    if (!isPdfResponseHeaders(details.responseHeaders)) return;
+                    if (dedupePdfRedirect(tabId, url)) return;
+
+                    logInfo("Auto redirect remote PDF (by headers)", {
+                        tabId,
+                        url,
+                        statusCode: details.statusCode,
+                        type: details.type,
+                    });
+                    redirectTabToPdfViewer(tabId, url);
+                },
+                { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "object", "xmlhttprequest", "other"] },
+                ["responseHeaders"]
+            );
+        } catch (e) {
+            logWarn("Failed to register webRequest PDF detector", { error: String(e) });
+        }
+    }
+
+    function registerWebNavigationListener() {
+        if (!chrome.webNavigation?.onCommitted?.addListener) {
+            chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+                const url = changeInfo?.url || tab?.url;
+                if (!url) return;
+                maybeAutoRedirectPdf(tabId, url);
+            });
+            return;
+        }
+
+        const schemes = ["file", "http", "https"];
+        if (state.extensionScheme && !schemes.includes(state.extensionScheme)) {
+            schemes.push(state.extensionScheme);
+        }
+
+        chrome.webNavigation.onCommitted.addListener(
+            (details) => {
+                if (!state.enabled) return;
+                if (!details || details.frameId !== 0) return;
+
+                const tabId = details.tabId;
+                const rawUrl = details.url;
+                if (!rawUrl) return;
+
+                const extractedSourceUrl = extractPdfSourceUrlFromExtensionViewerUrl(rawUrl);
+                const effectiveUrl = extractedSourceUrl || rawUrl;
+
+                const now = Date.now();
+                const lastEntry = lastHandledUrlByTabId.get(tabId);
+                const transitionQualifiers = details.transitionQualifiers || [];
+                const isReload =
+                    details.transitionType === "reload" ||
+                    (Array.isArray(transitionQualifiers) &&
+                        transitionQualifiers.includes("reload"));
+
+                if (
+                    !isReload &&
+                    lastEntry &&
+                    lastEntry.url === effectiveUrl &&
+                    now - lastEntry.at < 1000
+                ) {
+                    return;
+                }
+                lastHandledUrlByTabId.set(tabId, { url: effectiveUrl, at: now });
+
+                maybeAutoRedirectPdf(tabId, effectiveUrl, {
+                    forceRemoteHeaderCheck: !!extractedSourceUrl,
+                });
+            },
+            {
+                // Include the extension scheme so we can observe cases where the
+                // browser commits the navigation to its built-in PDF viewer like:
+                // chrome-extension://mhjfb.../index.html?file=https://...
+                url: schemes.map((s) => ({ schemes: [s] })),
+            }
+        );
+    }
+
+    function registerCleanupListener() {
+        chrome.tabs.onRemoved.addListener((tabId) => {
+            lastHandledUrlByTabId.delete(tabId);
+            lastRedirectedPdfByTabId.delete(tabId);
+        });
+    }
+
+    return { init };
+})();
+
+PdfAutoRedirect.init();
 
 /**
  * Service Worker 오류 필터링 - 알려진 오류 패턴들을 차단
