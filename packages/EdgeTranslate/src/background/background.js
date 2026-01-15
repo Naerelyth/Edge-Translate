@@ -54,21 +54,8 @@ const PdfAutoRedirect = (() => {
     const remotePdfByHeaderInflight = new Map();
 
     function init() {
-        state.extensionScheme = (() => {
-            try {
-                return new URL(state.viewerBaseUrl).protocol.replace(":", "");
-            } catch {
-                return null;
-            }
-        })();
-
-        state.viewerOrigin = (() => {
-            try {
-                return new URL(state.viewerBaseUrl).origin;
-            } catch {
-                return null;
-            }
-        })();
+        state.extensionScheme = tryGetExtensionScheme(state.viewerBaseUrl);
+        state.viewerOrigin = tryGetOrigin(state.viewerBaseUrl);
 
         void refreshEnabledSetting();
         registerSettingsListener();
@@ -85,6 +72,26 @@ const PdfAutoRedirect = (() => {
         if (!initiator || typeof initiator !== "string") return false;
         if (!state.viewerOrigin) return false;
         return initiator.startsWith(state.viewerOrigin);
+    }
+
+    function isHttpUrl(url) {
+        return typeof url === "string" && (url.startsWith("http:") || url.startsWith("https:"));
+    }
+
+    function tryGetOrigin(url) {
+        try {
+            return new URL(url).origin;
+        } catch {
+            return null;
+        }
+    }
+
+    function tryGetExtensionScheme(url) {
+        try {
+            return new URL(url).protocol.replace(":", "");
+        } catch {
+            return null;
+        }
     }
 
     function shouldSkipPdfRedirect(url) {
@@ -221,6 +228,13 @@ const PdfAutoRedirect = (() => {
         return false;
     }
 
+    function maybeRedirectIfPdf(tabId, sourceUrl, logContext = {}) {
+        if (!state.enabled) return;
+        if (dedupePdfRedirect(tabId, sourceUrl)) return;
+        logInfo("Auto redirect remote PDF", logContext);
+        redirectTabToPdfViewer(tabId, sourceUrl);
+    }
+
     async function isRemotePdfByHeaders(url) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
@@ -291,9 +305,7 @@ const PdfAutoRedirect = (() => {
         // This covers local files (file://) and serves as a fallback for remote files
         // if webRequest missed them or we are in a race condition.
         if (isPdfUrl(url)) {
-            if (dedupePdfRedirect(tabId, url)) return;
-            logInfo("Auto redirect PDF (by URL)", { tabId, url });
-            redirectTabToPdfViewer(tabId, url);
+            maybeRedirectIfPdf(tabId, url, { tabId, url, reason: "url" });
             return;
         }
 
@@ -303,25 +315,18 @@ const PdfAutoRedirect = (() => {
         // since the actual PDF is fetched as a subresource and won't be detected
         // by main_frame headers.
         if (!chrome.webRequest?.onHeadersReceived?.addListener || forceRemoteHeaderCheck) {
-            if (!isProbablyPdfUrl(url) && !forceRemoteHeaderCheck) return;
-
-            try {
-                const parsed = new URL(url);
-                if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
-            } catch {
-                return;
-            }
+            if (!forceRemoteHeaderCheck && !isProbablyPdfUrl(url)) return;
+            if (!isHttpUrl(url)) return;
 
             void (async () => {
                 const isPdf = await isRemotePdfByHeadersCached(url);
-                if (!isPdf || !state.enabled) return;
-                if (dedupePdfRedirect(tabId, url)) return;
-                logInfo("Auto redirect remote PDF (fallback)", {
+                if (!isPdf) return;
+                maybeRedirectIfPdf(tabId, url, {
                     tabId,
                     url,
+                    reason: "fallback",
                     forced: forceRemoteHeaderCheck,
                 });
-                redirectTabToPdfViewer(tabId, url);
             })();
         }
     }
@@ -332,11 +337,8 @@ const PdfAutoRedirect = (() => {
         try {
             chrome.webRequest.onHeadersReceived.addListener(
                 (details) => {
-                    if (!state.enabled) return;
-                    if (!details) return;
-                    if (!details.url || (details.url.startsWith("http:") === false && details.url.startsWith("https:") === false)) {
-                        return;
-                    }
+                    if (!state.enabled || !details) return;
+                    if (!isHttpUrl(details.url)) return;
                     const tabId = details.tabId;
                     if (typeof tabId !== "number" || tabId < 0) return;
 
@@ -345,15 +347,14 @@ const PdfAutoRedirect = (() => {
                     const url = details.url;
                     if (shouldSkipPdfRedirect(url)) return;
                     if (!isPdfResponseHeaders(details.responseHeaders)) return;
-                    if (dedupePdfRedirect(tabId, url)) return;
 
-                    logInfo("Auto redirect remote PDF (by headers)", {
+                    maybeRedirectIfPdf(tabId, url, {
                         tabId,
                         url,
+                        reason: "headers",
                         statusCode: details.statusCode,
                         type: details.type,
                     });
-                    redirectTabToPdfViewer(tabId, url);
                 },
                 { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "object", "xmlhttprequest", "other"] },
                 ["responseHeaders"]
