@@ -209,10 +209,11 @@ const PdfAutoRedirect = (() => {
     }
 
     function isPdfResponseHeaders(headers) {
+        const contentDisposition = getHeaderValue(headers, "content-disposition");
+        if (/\battachment\b/i.test(contentDisposition)) return false;
+
         const contentType = getHeaderValue(headers, "content-type");
         if (/application\/(x-)?pdf/i.test(contentType)) return true;
-
-        const contentDisposition = getHeaderValue(headers, "content-disposition");
         if (/filename\*?=/.test(contentDisposition) && /\.pdf\b/i.test(contentDisposition)) {
             return true;
         }
@@ -247,6 +248,8 @@ const PdfAutoRedirect = (() => {
             });
 
             const contentType = resp.headers.get("content-type") || "";
+            const contentDisposition = resp.headers.get("content-disposition") || "";
+            if (/\battachment\b/i.test(contentDisposition)) return false;
             return /application\/pdf/i.test(contentType);
         } catch {
             return false;
