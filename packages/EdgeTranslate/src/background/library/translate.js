@@ -510,8 +510,13 @@ class TranslatorManager {
                 if (this.inflightTranslate.has(key)) {
                     result = await this.inflightTranslate.get(key);
                 } else {
-                    const promise = this.TRANSLATORS[translatorId]
-                        .translate(text, sl, tl)
+                    const timeoutPromise = new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error("Translation timeout")), 15000);
+                    });
+                    const promise = Promise.race([
+                        this.TRANSLATORS[translatorId].translate(text, sl, tl),
+                        timeoutPromise
+                    ])
                         .then((res) => {
                             if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
                             return res;
