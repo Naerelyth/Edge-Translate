@@ -178,7 +178,9 @@ class TranslatorManager {
      */
     provideServices() {
         // Translate service.
-        this.channel.provide("translate", (params, sender) => this.translate(params.text, params.position, sender?.tab?.id));
+        this.channel.provide("translate", (params, sender) =>
+            this.translate(params.text, params.position, sender?.tab?.id)
+        );
 
         // Quiet single-text translate service for DOM page translation (no UI events)
         this.channel.provide("translate_text_quiet", async (params) => {
@@ -209,7 +211,13 @@ class TranslatorManager {
                 this.TTS_SPEED = speed === "fast" ? "slow" : "fast";
             }
 
-            return this.pronounce(params.pronouncing, params.text, params.language, speed, sender?.tab?.id);
+            return this.pronounce(
+                params.pronouncing,
+                params.text,
+                params.language,
+                speed,
+                sender?.tab?.id
+            );
         });
 
         // Get available translators service.
@@ -223,7 +231,7 @@ class TranslatorManager {
         );
         // TTS 완료 이벤트 중계 서비스
         this.channel.provide("tts_finished", async (params, sender) => {
-            const currentTabId = sender?.tab?.id || await this.getCurrentTabId();
+            const currentTabId = sender?.tab?.id || (await this.getCurrentTabId());
             if (currentTabId !== -1) {
                 this.channel.emitToTabs(currentTabId, "pronouncing_finished", params);
             }
@@ -231,7 +239,7 @@ class TranslatorManager {
         });
         // TTS 오류 이벤트 중계 서비스
         this.channel.provide("tts_error", async (params, sender) => {
-            const currentTabId = sender?.tab?.id || await this.getCurrentTabId();
+            const currentTabId = sender?.tab?.id || (await this.getCurrentTabId());
             if (currentTabId !== -1) {
                 this.channel.emitToTabs(currentTabId, "pronouncing_error", params);
             }
@@ -449,7 +457,7 @@ class TranslatorManager {
         await this.config_loader;
 
         // get current tab id
-        const currentTabId = senderTabId || await this.getCurrentTabId();
+        const currentTabId = senderTabId || (await this.getCurrentTabId());
         if (currentTabId === -1) return;
 
         /**
@@ -515,7 +523,7 @@ class TranslatorManager {
                     });
                     const promise = Promise.race([
                         this.TRANSLATORS[translatorId].translate(text, sl, tl),
-                        timeoutPromise
+                        timeoutPromise,
                     ])
                         .then((res) => {
                             if (res) this.rememberTranslation(text, sl, tl, translatorId, res);
@@ -558,7 +566,7 @@ class TranslatorManager {
         await this.config_loader;
 
         // get current tab id
-        const currentTabId = senderTabId || await this.getCurrentTabId();
+        const currentTabId = senderTabId || (await this.getCurrentTabId());
         if (currentTabId === -1) return;
 
         let lang = language;

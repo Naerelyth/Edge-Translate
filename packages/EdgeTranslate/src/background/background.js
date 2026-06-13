@@ -351,15 +351,28 @@ const PdfAutoRedirect = (() => {
                     if (shouldSkipPdfRedirect(url)) return;
                     if (!isPdfResponseHeaders(details.responseHeaders)) return;
 
-                    maybeRedirectIfPdf(tabId, url, {
-                        tabId,
-                        url,
-                        reason: "headers",
-                        statusCode: details.statusCode,
-                        type: details.type,
-                    });
+                    if (details.type === "main_frame") {
+                        maybeRedirectIfPdf(tabId, url, {
+                            tabId,
+                            url,
+                            reason: "headers",
+                            statusCode: details.statusCode,
+                            type: details.type,
+                        });
+                    } else {
+                        if (dedupePdfRedirect(tabId, url)) return;
+                        chrome.tabs
+                            .sendMessage(tabId, {
+                                action: "BACKGROUND_PDF_DETECTED",
+                                url,
+                            })
+                            .catch(() => {});
+                    }
                 },
-                { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "object", "xmlhttprequest", "other"] },
+                {
+                    urls: ["<all_urls>"],
+                    types: ["main_frame", "sub_frame", "object", "xmlhttprequest", "other"],
+                },
                 ["responseHeaders"]
             );
         } catch (e) {
@@ -429,6 +442,16 @@ const PdfAutoRedirect = (() => {
         chrome.tabs.onRemoved.addListener((tabId) => {
             lastHandledUrlByTabId.delete(tabId);
             lastRedirectedPdfByTabId.delete(tabId);
+        });
+
+        // Listen for messages from content scripts to open PDF viewer in new tab
+        chrome.runtime.onMessage.addListener((message, sender) => {
+            if (message && message.action === "OPEN_PDF_TAB" && message.url) {
+                chrome.tabs.create({
+                    url: message.url,
+                    index: sender.tab ? sender.tab.index + 1 : undefined,
+                });
+            }
         });
     }
 

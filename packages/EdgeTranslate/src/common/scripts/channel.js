@@ -53,12 +53,16 @@ class Channel {
                         if (!server) break;
 
                         // We can call the callback only when we really provide the requested service.
-                        server(parsed.params, sender).then(
-                            (result) => callback && callback(result)
-                        ).catch((error) => {
-                            console.error(`[EdgeTranslate] Service '${parsed.service}' failed:`, error);
-                            callback && callback({ error: error ? error.toString() : "Unknown error" });
-                        });
+                        server(parsed.params, sender)
+                            .then((result) => callback && callback(result))
+                            .catch((error) => {
+                                console.error(
+                                    `[EdgeTranslate] Service '${parsed.service}' failed:`,
+                                    error
+                                );
+                                callback &&
+                                    callback({ error: error ? error.toString() : "Unknown error" });
+                            });
                         return true;
                     }
                     default:

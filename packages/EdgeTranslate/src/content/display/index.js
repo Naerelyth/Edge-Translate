@@ -1,6 +1,7 @@
 /** @jsx h */
-import { h, render } from "preact";
+import { h, render, Fragment } from "preact";
 import Panel from "./Panel.jsx";
+import PdfNotice from "./PdfNotice.jsx";
 import { wrapConsoleForFiltering } from "common/scripts/logger.js";
 
 /**
@@ -51,7 +52,13 @@ window.addEventListener("unhandledrejection", (event) => {
 
 (async function initialize() {
     try {
-        render(<Panel />, document.documentElement);
+        render(
+            <Fragment>
+                <Panel />
+                <PdfNotice />
+            </Fragment>,
+            document.documentElement
+        );
         // Prepare this polyfill for the useMeasure hook of "react-use".
         if (!window.ResizeObserver) {
             window.ResizeObserver = (await import("resize-observer-polyfill")).default;
@@ -67,7 +74,13 @@ window.addEventListener("unhandledrejection", (event) => {
             console.warn("[EdgeTranslate] JSX 초기화 오류 - 재시도 중...");
             setTimeout(() => {
                 try {
-                    render(<Panel />, document.documentElement);
+                    render(
+                        <Fragment>
+                            <Panel />
+                            <PdfNotice />
+                        </Fragment>,
+                        document.documentElement
+                    );
                 } catch (retryError) {
                     console.warn("[EdgeTranslate] JSX 재시도 실패:", retryError.message);
                 }
