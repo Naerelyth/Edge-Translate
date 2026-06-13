@@ -1,5 +1,5 @@
 import { getDomain } from "common/scripts/common.js";
-import { isPDFjsPDFViewer, detectSelect } from "../common.js";
+import { isPDFjsPDFViewer, detectSelect, isChromePDFViewer } from "../common.js";
 import Channel from "common/scripts/channel.js";
 import { DEFAULT_SETTINGS, getOrSetDefaultSettings } from "common/scripts/settings.js";
 
@@ -15,17 +15,29 @@ let HasButtonShown = false;
 /**
  * Initiate translation button.
  */
-let translationButtonContainer = document.createElement("iframe");
-const iframeContainer = translationButtonContainer;
-// Note: some websites can't get contentDocument e.g. https://raw.githubusercontent.com/git/git/master/Documentation/RelNotes/2.40.0.txt. So I use shadow DOM as a fallback.
-document.documentElement.appendChild(translationButtonContainer);
-if (translationButtonContainer.contentDocument === null) {
-    translationButtonContainer = document.createElement("div");
-    renderButton();
+let translationButtonContainer = null;
+let HasContainerInitialized = false;
+
+function initContainer() {
+    if (HasContainerInitialized) return;
+    HasContainerInitialized = true;
+
+    translationButtonContainer = document.createElement("iframe");
+    const iframeContainer = translationButtonContainer;
+    // Note: some websites can't get contentDocument e.g. https://raw.githubusercontent.com/git/git/master/Documentation/RelNotes/2.40.0.txt. So I use shadow DOM as a fallback.
+    document.documentElement.appendChild(translationButtonContainer);
+    if (translationButtonContainer.contentDocument === null) {
+        translationButtonContainer = document.createElement("div");
+        renderButton();
+    }
+    document.documentElement.removeChild(iframeContainer);
+    translationButtonContainer.id = "edge-translate-button";
+    translationButtonContainer.style.backgroundColor = "white"; // programatically set style to compatible with the extension 'Dark Reader'
+
+    if (translationButtonContainer.tagName.toLowerCase() === "iframe") {
+        translationButtonContainer.addEventListener("load", renderButton);
+    }
 }
-document.documentElement.removeChild(iframeContainer);
-translationButtonContainer.id = "edge-translate-button";
-translationButtonContainer.style.backgroundColor = "white"; // programatically set style to compatible with the extension 'Dark Reader'
 
 /**
  * When the user clicks the translation button, the translationButtonContainer will be mounted at document.documentElement and the load event will be triggered.
@@ -76,7 +88,6 @@ function renderButton() {
     translationButton.addEventListener("mousedown", buttonClickHandler);
     translationButton.addEventListener("contextmenu", (e) => e.preventDefault());
 }
-translationButtonContainer.addEventListener("load", renderButton);
 
 let originScrollX = 0; // record the original scroll X position(before scroll event)
 let originScrollY = 0; // record the original scroll Y position(before scroll event)
@@ -102,6 +113,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // this listener activated when document content is loaded
 // to make selection button available ASAP
 window.addEventListener("DOMContentLoaded", () => {
+    if (isChromePDFViewer()) return; // Don't run in native PDF viewer
+    initContainer();
     // the scrolling elements in pdf files are different from normal web pages
     if (isPDFjsPDFViewer()) {
         // #viewerContainer element is the scrolling element in a pdf file
