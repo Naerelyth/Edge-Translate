@@ -178,7 +178,7 @@ class TranslatorManager {
      */
     provideServices() {
         // Translate service.
-        this.channel.provide("translate", (params) => this.translate(params.text, params.position));
+        this.channel.provide("translate", (params, sender) => this.translate(params.text, params.position, sender?.tab?.id));
 
         // Quiet single-text translate service for DOM page translation (no UI events)
         this.channel.provide("translate_text_quiet", async (params) => {
@@ -202,14 +202,14 @@ class TranslatorManager {
         });
 
         // Pronounce service.
-        this.channel.provide("pronounce", (params) => {
+        this.channel.provide("pronounce", (params, sender) => {
             let speed = params.speed;
             if (!speed) {
                 speed = this.TTS_SPEED;
                 this.TTS_SPEED = speed === "fast" ? "slow" : "fast";
             }
 
-            return this.pronounce(params.pronouncing, params.text, params.language, speed);
+            return this.pronounce(params.pronouncing, params.text, params.language, speed, sender?.tab?.id);
         });
 
         // Get available translators service.
@@ -222,16 +222,16 @@ class TranslatorManager {
             this.updateDefaultTranslator(detail.translator)
         );
         // TTS 완료 이벤트 중계 서비스
-        this.channel.provide("tts_finished", async (params) => {
-            const currentTabId = await this.getCurrentTabId();
+        this.channel.provide("tts_finished", async (params, sender) => {
+            const currentTabId = sender?.tab?.id || await this.getCurrentTabId();
             if (currentTabId !== -1) {
                 this.channel.emitToTabs(currentTabId, "pronouncing_finished", params);
             }
             return Promise.resolve();
         });
         // TTS 오류 이벤트 중계 서비스
-        this.channel.provide("tts_error", async (params) => {
-            const currentTabId = await this.getCurrentTabId();
+        this.channel.provide("tts_error", async (params, sender) => {
+            const currentTabId = sender?.tab?.id || await this.getCurrentTabId();
             if (currentTabId !== -1) {
                 this.channel.emitToTabs(currentTabId, "pronouncing_error", params);
             }
@@ -444,12 +444,12 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} translate finished Promise
      */
-    async translate(text, position) {
+    async translate(text, position, senderTabId) {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
         // get current tab id
-        const currentTabId = await this.getCurrentTabId();
+        const currentTabId = senderTabId || await this.getCurrentTabId();
         if (currentTabId === -1) return;
 
         /**
@@ -553,12 +553,12 @@ class TranslatorManager {
      *
      * @returns {Promise<void>} pronounce finished Promise
      */
-    async pronounce(pronouncing, text, language, speed) {
+    async pronounce(pronouncing, text, language, speed, senderTabId) {
         // Ensure that configurations have been initialized.
         await this.config_loader;
 
         // get current tab id
-        const currentTabId = await this.getCurrentTabId();
+        const currentTabId = senderTabId || await this.getCurrentTabId();
         if (currentTabId === -1) return;
 
         let lang = language;

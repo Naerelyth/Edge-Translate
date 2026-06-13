@@ -1320,14 +1320,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
                 .requestToTab(tab.id, "get_selection")
                 .then(({ text, position }) => {
                     if (text) {
-                        return TRANSLATOR_MANAGER.translate(text, position);
+                        return TRANSLATOR_MANAGER.translate(text, position, tab.id);
                     }
                     return Promise.reject();
                 })
                 .catch((error) => {
                     // If content scripts can not access the tab the selection, use info.selectionText instead.
                     if (info.selectionText.trim()) {
-                        return TRANSLATOR_MANAGER.translate(info.selectionText, null);
+                        return TRANSLATOR_MANAGER.translate(info.selectionText, null, tab.id);
                     }
                     return Promise.resolve(error);
                 });
