@@ -16649,7 +16649,8 @@ const PDFViewerApplication = {
     }
     if (file) {
       this.open({
-        url: file
+        url: file,
+        withCredentials: true
       });
     } else {
       this._hideViewBookmark();
@@ -16878,6 +16879,14 @@ const PDFViewerApplication = {
       } else if (reason instanceof ResponseException) {
         key = reason.missing ? "pdfjs-missing-file-error" : "pdfjs-unexpected-response-error";
       }
+
+      const fileUrl = new URLSearchParams(window.location.search).get("file");
+      if (fileUrl && (fileUrl.startsWith("http:") || fileUrl.startsWith("https:"))) {
+        console.warn("EdgeTranslate: Built-in PDF viewer failed to load remote PDF, falling back to native view:", reason);
+        window.location.replace(fileUrl);
+        return undefined;
+      }
+
       return this._documentError(key, {
         message: reason.message
       }).then(() => {

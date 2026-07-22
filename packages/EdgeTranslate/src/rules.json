@@ -1,0 +1,31 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": {
+            "type": "modifyHeaders",
+            "requestHeaders": [
+                {
+                    "header": "origin",
+                    "operation": "remove"
+                }
+            ],
+            "responseHeaders": [
+                {
+                    "header": "access-control-allow-origin",
+                    "operation": "set",
+                    "value": "*"
+                },
+                {
+                    "header": "access-control-allow-credentials",
+                    "operation": "set",
+                    "value": "true"
+                }
+            ]
+        },
+        "condition": {
+            "urlFilter": "*.pdf*",
+            "resourceTypes": ["xmlhttprequest", "other"]
+        }
+    }
+]

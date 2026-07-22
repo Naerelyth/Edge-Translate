@@ -23,12 +23,54 @@ import {
 // messages immediately; register the runtime message listener ASAP.
 const channel = new Channel();
 
+function setupPdfSessionRules(sourceUrl) {
+    if (!chrome.declarativeNetRequest?.updateSessionRules || !sourceUrl) return;
+    try {
+        const parsed = new URL(sourceUrl);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+        const origin = parsed.origin;
+        chrome.declarativeNetRequest.updateSessionRules({
+            removeRuleIds: [9999],
+            addRules: [
+                {
+                    id: 9999,
+                    priority: 10,
+                    action: {
+                        type: "modifyHeaders",
+                        requestHeaders: [
+                            { header: "referer", operation: "set", value: origin + "/" },
+                            { header: "origin", operation: "set", value: origin },
+                        ],
+                        responseHeaders: [
+                            { header: "access-control-allow-origin", operation: "set", value: "*" },
+                            { header: "access-control-allow-credentials", operation: "set", value: "true" },
+                            { header: "access-control-allow-methods", operation: "set", value: "GET, HEAD, OPTIONS, POST" },
+                            { header: "access-control-allow-headers", operation: "set", value: "*" },
+                        ],
+                    },
+                    condition: {
+                        urlFilter: sourceUrl,
+                        resourceTypes: ["xmlhttprequest", "other", "sub_frame"],
+                    },
+                },
+            ],
+        });
+    } catch {}
+}
+
 // Handle PDF redirect requests from `content/pdf.js`.
-channel.on("redirect", (detail, sender) =>
+channel.on("redirect", (detail, sender) => {
+    if (detail?.url) {
+        try {
+            const urlObj = new URL(detail.url);
+            const fileParam = urlObj.searchParams.get("file");
+            if (fileParam) setupPdfSessionRules(fileParam);
+        } catch {}
+    }
     chrome.tabs.update(sender.tab.id, {
         url: detail.url,
-    })
-);
+    });
+});
 
 // ------------------------------------------------------------
 // PDF auto redirect (background-driven, MV3-safe)
@@ -120,6 +162,7 @@ const PdfAutoRedirect = (() => {
     }
 
     function redirectTabToPdfViewer(tabId, sourceUrl) {
+        setupPdfSessionRules(sourceUrl);
         const targetUrl = chrome.runtime.getURL(
             `pdf/viewer.html?file=${encodeURIComponent(sourceUrl)}`
         );
@@ -238,10 +281,10 @@ const PdfAutoRedirect = (() => {
 
     async function isRemotePdfByHeaders(url) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         try {
             const resp = await fetch(url, {
-                method: "HEAD",
+                method: "GET",
                 redirect: "follow",
                 credentials: "include",
                 signal: controller.signal,
@@ -249,8 +292,16 @@ const PdfAutoRedirect = (() => {
 
             const contentType = resp.headers.get("content-type") || "";
             const contentDisposition = resp.headers.get("content-disposition") || "";
+
+            controller.abort();
+
+            if (!resp.ok) return false;
             if (/\battachment\b/i.test(contentDisposition)) return false;
-            return /application\/pdf/i.test(contentType);
+            if (/application\/(x-)?pdf/i.test(contentType)) return true;
+            if (/filename\*?=/i.test(contentDisposition) && /\.pdf\b/i.test(contentDisposition)) {
+                return true;
+            }
+            return false;
         } catch {
             return false;
         } finally {
@@ -304,11 +355,25 @@ const PdfAutoRedirect = (() => {
         if (shouldSkipPdfRedirect(url)) return;
 
         // 1. URL-based detection (Local & Remote)
-        // If the URL ends in .pdf, we assume it's a PDF and redirect.
-        // This covers local files (file://) and serves as a fallback for remote files
-        // if webRequest missed them or we are in a race condition.
+        // If the URL ends in .pdf, we check if it's local or remote.
+        // For local files (file://), we assume it's a PDF and redirect.
+        // For remote files (http://, https://), we verify response headers first
+        // to avoid redirecting HTML security verification / challenge pages, paywalls, or error pages.
         if (isPdfUrl(url)) {
-            maybeRedirectIfPdf(tabId, url, { tabId, url, reason: "url" });
+            if (!isHttpUrl(url)) {
+                maybeRedirectIfPdf(tabId, url, { tabId, url, reason: "url" });
+                return;
+            }
+
+            void (async () => {
+                const isPdf = await isRemotePdfByHeadersCached(url);
+                if (!isPdf) return;
+                maybeRedirectIfPdf(tabId, url, {
+                    tabId,
+                    url,
+                    reason: "remote_url_verified",
+                });
+            })();
             return;
         }
 
@@ -447,6 +512,7 @@ const PdfAutoRedirect = (() => {
         // Listen for messages from content scripts to open PDF viewer in new tab
         chrome.runtime.onMessage.addListener((message, sender) => {
             if (message && message.action === "OPEN_PDF_TAB" && message.url) {
+                setupPdfSessionRules(message.url);
                 chrome.tabs.create({
                     url: message.url,
                     index: sender.tab ? sender.tab.index + 1 : undefined,
