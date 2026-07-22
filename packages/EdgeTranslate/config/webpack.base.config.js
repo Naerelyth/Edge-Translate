@@ -34,6 +34,7 @@ module.exports = {
                 test: [/\.svg$/],
                 loader: "@svgr/webpack",
                 options: {
+                    exportType: "default",
                     titleProp: true,
                 },
             },
@@ -43,7 +44,7 @@ module.exports = {
         alias: {
             "@edge_translate/translators": path.resolve(
                 __dirname,
-                "../../translators/dist/translators.es.js"
+                "../../translators/dist/translators.mjs",
             ),
             "@": path.resolve(__dirname, "../src"),
             common: path.resolve(__dirname, "../src/common"),
@@ -56,6 +57,7 @@ module.exports = {
             path: false,
             fs: false,
             stream: false,
+            url: false,
         },
     },
     performance: {

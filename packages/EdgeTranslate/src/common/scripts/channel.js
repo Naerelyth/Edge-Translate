@@ -34,12 +34,10 @@ class Channel {
                 try {
                     parsed = typeof message === "string" ? JSON.parse(message) : message;
                 } catch (error) {
-                    console.error("Failed to parse message", error);
                     return;
                 }
 
-                if (!parsed || !parsed.type) {
-                    console.error(`Bad message: ${message}`);
+                if (!parsed || typeof parsed !== "object" || !parsed.type) {
                     return;
                 }
 
@@ -66,7 +64,6 @@ class Channel {
                         return true;
                     }
                     default:
-                        console.error(`Unknown message type: ${parsed.type}`);
                         break;
                 }
                 return;

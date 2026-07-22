@@ -59,10 +59,7 @@ window.addEventListener("unhandledrejection", (event) => {
             </Fragment>,
             document.documentElement
         );
-        // Prepare this polyfill for the useMeasure hook of "react-use".
-        if (!window.ResizeObserver) {
-            window.ResizeObserver = (await import("resize-observer-polyfill")).default;
-        }
+        // ResizeObserver is supported natively in all supported extension browsers.
     } catch (error) {
         if (
             error.message &&

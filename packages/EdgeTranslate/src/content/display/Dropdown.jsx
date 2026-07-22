@@ -113,7 +113,9 @@ const Menu = styled.ul`
     top: 100%;
     z-index: 6;
     float: left;
-    box-shadow: 0 0 10px rgb(0 0 0 / 6%), 0 4px 4px rgb(0 0 0 / 12%);
+    box-shadow:
+        0 0 10px rgb(0 0 0 / 6%),
+        0 4px 4px rgb(0 0 0 / 12%);
 `;
 const Title = styled.a`
     display: flex;
@@ -133,7 +135,9 @@ const Title = styled.a`
     font-size: 14px;
     line-height: 1.5;
     border-radius: 6px;
-    transition: color 0.2s linear, background-color 0.3s linear;
+    transition:
+        color 0.2s linear,
+        background-color 0.3s linear;
     color: gray;
     background-color: transparent;
     overflow: hidden;
@@ -179,9 +183,15 @@ const Item = styled.li`
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    -webkit-transition: color 0.3s linear, background-color 0.3s linear;
-    transition: color 0.3s linear, background-color 0.3s linear;
-    transition: color 0.3s linear, background-color 0.3s linear;
+    -webkit-transition:
+        color 0.3s linear,
+        background-color 0.3s linear;
+    transition:
+        color 0.3s linear,
+        background-color 0.3s linear;
+    transition:
+        color 0.3s linear,
+        background-color 0.3s linear;
     transition-property: color, background-color;
     transition-duration: 0.3s, 0.3s;
     transition-timing-function: linear, linear;

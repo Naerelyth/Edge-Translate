@@ -43,9 +43,21 @@ function setupPdfSessionRules(sourceUrl) {
                         ],
                         responseHeaders: [
                             { header: "access-control-allow-origin", operation: "set", value: "*" },
-                            { header: "access-control-allow-credentials", operation: "set", value: "true" },
-                            { header: "access-control-allow-methods", operation: "set", value: "GET, HEAD, OPTIONS, POST" },
-                            { header: "access-control-allow-headers", operation: "set", value: "*" },
+                            {
+                                header: "access-control-allow-credentials",
+                                operation: "set",
+                                value: "true",
+                            },
+                            {
+                                header: "access-control-allow-methods",
+                                operation: "set",
+                                value: "GET, HEAD, OPTIONS, POST",
+                            },
+                            {
+                                header: "access-control-allow-headers",
+                                operation: "set",
+                                value: "*",
+                            },
                         ],
                     },
                     condition: {
