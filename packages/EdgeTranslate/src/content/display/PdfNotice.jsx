@@ -17,7 +17,8 @@ const NoticeContainer = styled.div`
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     padding: 8px 16px;
     cursor: grab;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     user-select: none;
     transition: box-shadow 0.2s ease;
     touch-action: none;
@@ -168,7 +169,7 @@ const PdfNotice = () => {
     if (!isVisible || pdfUrls.length === 0) return null;
 
     return (
-        <root.div>
+        <root.div id="edge-translate-notice-container">
             <NoticeContainer
                 style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
                 onPointerDown={handlePointerDown}

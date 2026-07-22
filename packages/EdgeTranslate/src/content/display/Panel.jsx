@@ -932,6 +932,7 @@ export default function ResultPanel() {
     return (
         open && (
             <root.div
+                id="edge-translate-panel-container"
                 ref={containerElRef}
                 style={
                     usePDFMaskLayer
@@ -1137,9 +1138,16 @@ const Panel = styled.div`
     box-sizing: border-box;
     -moz-tab-size: 4;
     tab-size: 4;
-    font-family: system-ui, -apple-system,
-        /* Firefox supports this but not yet 'system-ui' */ "Segoe UI", Roboto, Helvetica, Arial,
-        sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    font-family:
+        system-ui,
+        -apple-system,
+        /* Firefox supports this but not yet 'system-ui' */ "Segoe UI",
+        Roboto,
+        Helvetica,
+        Arial,
+        sans-serif,
+        "Apple Color Emoji",
+        "Segoe UI Emoji";
 
     &:before {
         content: "";
@@ -1200,7 +1208,9 @@ const HeadIcon = styled.div`
 `;
 
 const StyledPinIcon = styled(PinIcon)`
-    transition: transform 0.4s, fill 0.2s linear !important;
+    transition:
+        transform 0.4s,
+        fill 0.2s linear !important;
     ${(props) => (props.fix ? "" : "transform: rotate(45deg)")}
 `;
 

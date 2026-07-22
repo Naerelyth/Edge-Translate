@@ -110,6 +110,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
     ButtonPositionSetting = changes.LayoutSettings.newValue.SelectTranslatePosition;
 });
 
+/**
+ * Check if an event occurred inside an EdgeTranslate UI component (button, panel, notice).
+ * @param {Event} event
+ * @returns {boolean}
+ */
+function isEdgeTranslateUI(event) {
+    if (!event) return false;
+    const path = event.composedPath ? event.composedPath() : [event.target];
+    for (let i = 0; i < path.length; i++) {
+        const el = path[i];
+        if (el && el.id && typeof el.id === "string" && el.id.startsWith("edge-translate-")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // this listener activated when document content is loaded
 // to make selection button available ASAP
 window.addEventListener("DOMContentLoaded", () => {
@@ -125,19 +142,23 @@ window.addEventListener("DOMContentLoaded", () => {
     // to make the selection icon move with the mouse scrolling
     scrollingElement.addEventListener("scroll", scrollHandler);
 
-    document.addEventListener("mousedown", () => {
+    document.addEventListener("mousedown", (e) => {
+        if (isEdgeTranslateUI(e)) return;
         disappearButton();
         // whether user take a select action
         detectSelect(document, (event) => {
+            if (isEdgeTranslateUI(event)) return;
             selectTranslate(event);
         });
     });
 
     document.addEventListener("dblclick", (event) => {
+        if (isEdgeTranslateUI(event)) return;
         selectTranslate(event, true);
     });
 
     document.addEventListener("click", (event) => {
+        if (isEdgeTranslateUI(event)) return;
         // triple click
         if (event.detail === 3) {
             selectTranslate(event, true);
@@ -279,9 +300,9 @@ function translateSubmit() {
                 // to check whether user need to cancel text selection after translation finished
                 if (result.OtherSettings && result.OtherSettings["CancelTextSelection"]) {
                     cancelTextSelection();
+                    disappearButton();
                 }
             });
-            disappearButton();
         });
     }
 }
